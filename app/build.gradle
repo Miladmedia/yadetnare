@@ -1,0 +1,8 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ir.yadavar'
+    compileSdk 35
+    defaultConfig { applicationId 'ir.yadavar'; minSdk 30; targetSdk 35; versionCode 2; versionName '2.0' }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
