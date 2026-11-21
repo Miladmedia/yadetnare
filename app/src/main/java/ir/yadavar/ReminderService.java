@@ -2,10 +2,14 @@ package ir.yadavar;
 
 import android.app.*;
 import android.content.*;
+import android.graphics.*;
+import android.graphics.drawable.*;
 import android.media.*;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
+import android.view.*;
+import android.widget.*;
 import java.util.*;
 
 public class ReminderService extends Service {
@@ -18,6 +22,9 @@ public class ReminderService extends Service {
     Set<Long> posted = new HashSet<>();
     List<Long> alertLog = new ArrayList<>();
     long lastAlert;
+    View glassAlert;
+    Runnable glassDismiss;
+    boolean glassClosing;
     Runnable tick = new Runnable() { @Override public void run() { tick(); h.postDelayed(this, 15000); } };
 
     static void poke(Context c) {
@@ -46,7 +53,10 @@ public class ReminderService extends Service {
             long rid = in.getLongExtra("id", 0);
             if (ACT_DONE.equals(in.getAction())) Store.remove(this, rid);
             else if (ACT_SNOOZE.equals(in.getAction())) Store.snooze(this, rid, System.currentTimeMillis() + 30 * 60000L);
-            if (!ACT_TICK.equals(in.getAction())) stopRing();
+            if (!ACT_TICK.equals(in.getAction())) {
+                stopRing();
+                hideGlassAlert(true);
+            }
         }
         tick();
         return START_STICKY;
@@ -100,7 +110,10 @@ public class ReminderService extends Service {
             nm.notify((int) (r.id % 1000000) + 10, b.build());
             posted.add(r.id);
         }
-        if (alertNow) startRing();
+        if (alertNow) {
+            startRing();
+            showGlassAlert(due);
+        }
 
         int count = 0;
         for (Reminder r : l) if (r.start <= now) count++;
@@ -123,6 +136,143 @@ public class ReminderService extends Service {
         } catch (Exception e) { }
     }
 
+    void showGlassAlert(List<Reminder> due) {
+        if (due == null || due.isEmpty()) return;
+        if (!U.sp(this).getBoolean("glass_alert", true)) return;
+        if (!Settings.canDrawOverlays(this)) return;
+
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm == null || !pm.isInteractive()) return;
+
+        if (glassDismiss != null) h.removeCallbacks(glassDismiss);
+        hideGlassAlert(false);
+
+        WindowManager wm = getSystemService(WindowManager.class);
+        if (wm == null) return;
+
+        FrameLayout root = new FrameLayout(ctx);
+        root.setLayoutDirection(U.fa(ctx) ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+        root.setPadding(U.dp(ctx, 16), U.dp(ctx, 36), U.dp(ctx, 16), U.dp(ctx, 16));
+        root.setOnClickListener(v -> hideGlassAlert(true));
+
+        final LinearLayout card = new LinearLayout(ctx);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(U.dp(ctx, 16), U.dp(ctx, 14), U.dp(ctx, 16), U.dp(ctx, 14));
+        card.setElevation(U.dp(ctx, 10));
+        card.setOnClickListener(v -> { });
+
+        boolean dark = isDark(U.bg(ctx));
+        GradientDrawable bg = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                dark ? new int[]{0xCC182232, 0xAA26364A} : new int[]{0xDDFFFFFF, 0xBFEAF8FF}
+        );
+        bg.setCornerRadius(U.dp(ctx, 24));
+        bg.setStroke(U.dp(ctx, 1), dark ? 0x55FFFFFF : 0x99FFFFFF);
+        card.setBackground(bg);
+
+        LinearLayout head = new LinearLayout(ctx);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = U.tv(ctx, due.size() == 1 ? U.t(ctx, "یادآوری", "Reminder") : U.t(ctx, "یادآوری‌ها", "Reminders"), 15, U.PRIMARY, true);
+        head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView close = U.tv(ctx, "✕", 20, U.sub(ctx), true);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(U.dp(ctx, 10), 0, U.dp(ctx, 10), 0);
+        close.setOnClickListener(v -> hideGlassAlert(true));
+        head.addView(close);
+        card.addView(head);
+
+        if (due.size() == 1) {
+            Reminder r = due.get(0);
+            card.addView(U.tv(ctx, r.t, 20, U.tx(ctx), true), U.lp(ctx, -1, -2, 8));
+            String lf = U.left(ctx, r.d);
+            if (!lf.isEmpty()) card.addView(U.tv(ctx, lf, 13, lf.startsWith("⚠") ? U.RED : U.sub(ctx), false), U.lp(ctx, -1, -2, 4));
+            if (!r.n.isEmpty()) card.addView(U.tv(ctx, r.n, 13, U.sub(ctx), false), U.lp(ctx, -1, -2, 4));
+        } else {
+            card.addView(U.tv(ctx, U.n(ctx, due.size()) + U.t(ctx, " یادآوری هم‌زمان", " reminders now"), 18, U.tx(ctx), true), U.lp(ctx, -1, -2, 8));
+            LinearLayout rows = new LinearLayout(ctx);
+            rows.setOrientation(LinearLayout.VERTICAL);
+            int shown = 0;
+            for (Reminder r : due) {
+                if (shown >= 6) break;
+                rows.addView(U.tv(ctx, "• " + r.t, 15, U.tx(ctx), true), U.lp(ctx, -1, -2, 4));
+                shown++;
+            }
+            if (due.size() > shown) {
+                rows.addView(U.tv(ctx, U.t(ctx, "و چند مورد دیگر…", "and more…"), 13, U.sub(ctx), false), U.lp(ctx, -1, -2, 4));
+            }
+            card.addView(rows, U.lp(ctx, -1, -2, 4));
+        }
+
+        TextView hint = U.tv(ctx, U.t(ctx, "برای بستن لمس کنید", "Tap to dismiss"), 12, U.sub(ctx), false);
+        hint.setGravity(Gravity.CENTER);
+        card.addView(hint, U.lp(ctx, -1, -2, 10));
+
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        cp.setMargins(U.dp(ctx, 8), 0, U.dp(ctx, 8), 0);
+        root.addView(card, cp);
+
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                -1, -1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+        );
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+
+        root.setAlpha(0f);
+        card.setAlpha(0f);
+        card.setScaleX(0.94f);
+        card.setScaleY(0.94f);
+        card.setTranslationY(-U.dp(ctx, 20));
+
+        try {
+            wm.addView(root, lp);
+            glassAlert = root;
+            glassClosing = false;
+            root.animate().alpha(1f).setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setDuration(220).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            glassDismiss = () -> hideGlassAlert(true);
+            h.postDelayed(glassDismiss, 5000);
+        } catch (Exception e) {
+            glassAlert = null;
+            glassClosing = false;
+        }
+    }
+
+    void hideGlassAlert(boolean animate) {
+        final View v = glassAlert;
+        if (v == null) return;
+        if (glassDismiss != null) {
+            h.removeCallbacks(glassDismiss);
+            glassDismiss = null;
+        }
+        if (glassClosing && animate) return;
+        glassClosing = true;
+
+        Runnable remove = () -> {
+            try {
+                WindowManager wm = getSystemService(WindowManager.class);
+                if (wm != null) wm.removeView(v);
+            } catch (Exception e) { }
+            if (glassAlert == v) glassAlert = null;
+            glassClosing = false;
+        };
+
+        if (!animate) {
+            try { v.animate().cancel(); } catch (Exception e) { }
+            remove.run();
+            return;
+        }
+
+        v.animate().cancel();
+        v.animate().alpha(0f).setDuration(180).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(remove).start();
+    }
+
+    boolean isDark(int color) {
+        int r = Color.red(color), g = Color.green(color), b = Color.blue(color);
+        return (r * 299 + g * 587 + b * 114) < 128000;
+    }
+
     void startRing() {
         stopRing();
         try {
@@ -137,6 +287,7 @@ public class ReminderService extends Service {
     void stopRing() { try { if (ring != null) ring.stop(); } catch (Exception e) { } ring = null; }
 
     @Override public void onDestroy() {
+        hideGlassAlert(false);
         h.removeCallbacksAndMessages(null);
         if (bubble != null) bubble.hide();
         super.onDestroy();

@@ -13,6 +13,8 @@ class Bubble {
     final WindowManager wm;
     TextView b;
     FrameLayout panel;
+    View panelCard;
+    boolean panelClosing;
     WindowManager.LayoutParams bp;
     final int size;
     GlassBubbleDrawable bubbleBg;
@@ -35,7 +37,7 @@ class Bubble {
             b.setBackground(bubbleBg);
         }
         bubbleBg.setMood(l.size(), urgent);
-        if (panel != null) fill(l);
+        if (panel != null && !panelClosing) fill(l);
     }
 
     void create() {
@@ -64,8 +66,10 @@ class Bubble {
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        if (!moved) openPanel();
-                        else {
+                        if (!moved) {
+                            if (panel != null) closePanel();
+                            else openPanel();
+                        } else {
                             bp.x = bp.x + size / 2 < sw() / 2 ? 0 : sw() - size;
                             wm.updateViewLayout(b, bp);
                             U.sp(svc).edit().putInt("bx", bp.x).putInt("by", bp.y).apply();
@@ -90,12 +94,13 @@ class Bubble {
     LinearLayout list;
 
     void openPanel() {
-        if (panel != null) return;
+        if (panel != null || panelClosing) return;
         panel = new FrameLayout(c);
         panel.setBackgroundColor(0x88000000);
         panel.setLayoutDirection(U.fa(c) ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
         panel.setOnClickListener(v -> closePanel());
         LinearLayout card = U.card(c);
+        panelCard = card;
         card.setOnClickListener(v -> { });
         FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
         fp.setMargins(U.dp(c, 20), 0, U.dp(c, 20), 0);
@@ -129,11 +134,19 @@ class Bubble {
         panel.addView(card, fp);
         WindowManager.LayoutParams p = lp(-1, -1, WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
         p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
-        panel.setAlpha(0);
+
+        panel.setAlpha(0f);
+        card.setAlpha(0f);
+        card.setScaleX(0.92f);
+        card.setScaleY(0.92f);
+        card.setTranslationY(U.dp(c, 24));
+
         wm.addView(panel, p);
-        panel.animate().alpha(1).setDuration(150).start();
-        b.animate().alpha(0.3f).setDuration(150).start();
         fill(Store.all(svc));
+
+        panel.animate().alpha(1f).setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setDuration(220).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        b.animate().alpha(0.3f).setDuration(150).start();
     }
 
     void fill(List<Reminder> l) {
@@ -156,15 +169,41 @@ class Bubble {
     }
 
     void closePanel() {
-        if (panel == null) return;
-        View p = panel;
-        panel = null; list = null;
-        try { wm.removeView(p); } catch (Exception e) { }
-        if (b != null) b.animate().alpha(1).setDuration(150).start();
+        if (panel == null || panelClosing) return;
+        panelClosing = true;
+        final View p = panel;
+        final View card = panelCard;
+        p.setOnClickListener(null);
+        if (card != null) {
+            card.animate().cancel();
+            card.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(U.dp(c, 18)).setDuration(150)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator()).start();
+        }
+        p.animate().cancel();
+        p.animate().alpha(0f).setDuration(170).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(() -> {
+            try { wm.removeView(p); } catch (Exception e) { }
+            if (panel == p) {
+                panel = null;
+                panelCard = null;
+                list = null;
+            }
+            panelClosing = false;
+        }).start();
+        if (b != null) b.animate().alpha(1f).setDuration(150).start();
     }
 
     void hide() {
-        closePanel();
+        if (panel != null) {
+            try {
+                panel.animate().cancel();
+                if (panelCard != null) panelCard.animate().cancel();
+                wm.removeView(panel);
+            } catch (Exception e) { }
+            panel = null;
+            panelCard = null;
+            list = null;
+            panelClosing = false;
+        }
         if (bubbleBg != null) bubbleBg.stop();
         if (b != null) { try { wm.removeView(b); } catch (Exception e) { } b = null; }
         bubbleBg = null;

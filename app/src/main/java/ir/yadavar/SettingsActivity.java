@@ -49,6 +49,9 @@ public class SettingsActivity extends Activity {
         g2.addView(mx);
         Switch bub = sw(U.t(c, "نمایش حباب شناور", "Floating bubble"), p.getBoolean("bubble", true));
         g2.addView(bub, U.lp(c, -1, -2, 8));
+        Switch glass = sw(U.t(c, "نمایش شیشه‌ای یادآوری روی صفحه (۵ ثانیه)", "Glass reminder on screen (5 seconds)"), p.getBoolean("glass_alert", true));
+        g2.addView(glass, U.lp(c, -1, -2, 8));
+        g2.addView(U.tv(c, U.t(c, "این حالت فقط وقتی صفحه روشن باشد و اجازهٔ نمایش روی برنامه‌های دیگر داده شده باشد نمایش داده می‌شود.", "This appears only while the screen is on and overlay permission is allowed."), 12, U.sub(c), false), U.lp(c, -2, -2, 4));
 
         LinearLayout g3 = section(box, U.t(c, "حالت خواب (اعلان بی‌صدا)", "Sleep mode (silent notifications)"));
         Switch q = sw(U.t(c, "فعال", "Enabled"), p.getBoolean("q", true));
@@ -68,6 +71,7 @@ public class SettingsActivity extends Activity {
                 startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())))), U.lp(c, -1, -2, 12));
         box.addView(U.btn(c, U.t(c, "ذخیره", "Save"), U.GREEN, v -> {
             p.edit().putInt("def", val(def, 15)).putInt("maxh", val(mx, 6)).putBoolean("bubble", bub.isChecked())
+                    .putBoolean("glass_alert", glass.isChecked())
                     .putBoolean("q", q.isChecked()).putInt("qs", qs[0]).putInt("qe", qe[0]).apply();
             ReminderService.poke(c);
             finish();
